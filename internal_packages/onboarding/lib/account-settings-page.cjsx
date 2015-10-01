@@ -7,6 +7,7 @@ ipc = require 'ipc'
 OnboardingActions = require './onboarding-actions'
 NylasApiEnvironmentStore = require './nylas-api-environment-store'
 Providers = require './account-types'
+Crypto = require 'crypto'
 
 class AccountSettingsPage extends React.Component
   @displayName: "AccountSettingsPage"
@@ -25,6 +26,8 @@ class AccountSettingsPage extends React.Component
       if field.default?
         @state.settings[field.name] = field.default
 
+    # Special case for gmail. Rather than showing a form, we poll in the
+    # background for completion of the gmail auth on the server.
     if @state.provider.name is 'gmail'
       poll_attempt_id = 0
       done = false
@@ -34,9 +37,12 @@ class AccountSettingsPage extends React.Component
       poll = (id,initial_delay) =>
         _retry = =>
           tries++
-          @_pollForGmailAccount((account) ->
-            if account?
+          @_pollForGmailAccount((account_data) ->
+            if account_data?
               done = true
+              {data,key:iv_string} = account_data
+              account_json = @_decrypt(data, @state.provider.encryptionKey, iv_string)
+              account = JSON.parse(account_json)
               OnboardingActions.accountJSONReceived(account)
             else if tries < 10 and id is poll_attempt_id
               setTimeout(_retry, delay)
@@ -267,6 +273,11 @@ class AccountSettingsPage extends React.Component
         callback(json)
       error: (err) =>
         callback()
+
+  _decrypt: (encrypted, key, iv) ->
+    decipher = Crypto.createDecipheriv('aes-256-ecb', key, iv)
+    dec = decipher.update(encrypted,'hex','utf8')
+    dec += decipher.final('utf8');
 
   _resize: =>
     setTimeout( =>
