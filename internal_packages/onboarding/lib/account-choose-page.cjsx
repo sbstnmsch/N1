@@ -67,18 +67,24 @@ class AccountChoosePage extends React.Component
       , 600
     OnboardingActions.moveToPage("account-settings", {provider})
 
+  _base64url: (buf) ->
+    # Python-style urlsafe_b64encode
+    buf.toString('base64')
+      .replace(/\+/g, '-') # Convert '+' to '-'
+      .replace(/\//g, '_') # Convert '/' to '_'
+
   _onBounceToGmail: (provider) =>
     crypto = require 'crypto'
-    base64url = require 'base64url'
 
     # Client key is used for polling. Requirements are that it not be guessable
     # and that it never collides with an active key (keys are active only between
     # initiating gmail auth and successfully requesting the account data once.
-    provider.clientKey = base64url(crypto.randomBytes(40))
+    provider.clientKey = @_base64url(crypto.randomBytes(40))
 
     # Encryption key is used to AES encrypt the account data during storage on the
-    # server. Requirement is that it not be bruteforcable.
-    provider.encryptionKey = base64url(crypto.randomBytes(25))
+    # server.
+    provider.encryptionKey = crypto.randomBytes(24)
+    provider.encryptionIv = crypto.randomBytes(16)
     code = "aaa" #atom.config.get("inviteCode")
     shell = require 'shell'
     googleUrl = url.format({
@@ -86,7 +92,7 @@ class AccountChoosePage extends React.Component
       host: 'accounts.google.com/o/oauth2/auth'
       query:
         response_type: 'code'
-        state: [provider.clientKey,provider.encryptionKey,code].join(',')
+        state: [provider.clientKey,@_base64url(provider.encryptionKey),@_base64url(provider.encryptionIv),code].join(',')
         client_id: '372024217839-cdsnrrqfr4d6b4gmlqepd7v0n0l0ip9q.apps.googleusercontent.com'
         redirect_uri: "#{EdgehillAPI.APIRoot}/oauth/google/callback"
         access_type: 'offline'

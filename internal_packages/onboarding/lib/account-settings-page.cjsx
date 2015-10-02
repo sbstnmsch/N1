@@ -29,7 +29,7 @@ class AccountSettingsPage extends React.Component
     # Special case for gmail. Rather than showing a form, we poll in the
     # background for completion of the gmail auth on the server.
     if @state.provider.name is 'gmail'
-      poll_attempt_id = 0
+      pollAttemptId = 0
       done = false
       # polling with capped exponential backoff
       delay = 1000
@@ -37,25 +37,34 @@ class AccountSettingsPage extends React.Component
       poll = (id,initial_delay) =>
         _retry = =>
           tries++
-          @_pollForGmailAccount((account_data) ->
+          @_pollForGmailAccount((account_data) =>
             if account_data?
               done = true
-              {data,key:iv_string} = account_data
-              account_json = @_decrypt(data, @state.provider.encryptionKey, iv_string)
-              account = JSON.parse(account_json)
+              {data} = account_data
+              accountJson = @_decrypt(data, @state.provider.encryptionKey, @state.provider.encryptionIv)
+              account = JSON.parse(accountJson)
               OnboardingActions.accountJSONReceived(account)
-            else if tries < 10 and id is poll_attempt_id
+            else if tries < 20 and id is pollAttemptId
               setTimeout(_retry, delay)
-              delay *= 1.5 # exponential backoff
+              delay *= 1.2 # exponential backoff
           )
         setTimeout(_retry,initial_delay)
 
       ipc.on('browser-window-focus', ->
         if not done  # hack to deactivate this listener when done
-          poll_attempt_id++
-          poll(poll_attempt_id,0)
+          pollAttemptId++
+          poll(pollAttemptId,0)
       )
-      poll(poll_attempt_id,2000)
+      poll(pollAttemptId,5000)
+
+  _decrypt: (encrypted, key, iv) ->
+    decipher = Crypto.createDecipheriv('aes-192-cbc', key, iv)
+    # The server pads the cyphertext with an extra block of all spaces at the end,
+    # to avoid having to call .final() here which seems to be broken...
+    dec = decipher.update(encrypted,'hex','utf8')
+    #dec += decipher.final('utf8');
+    return dec
+
 
   componentDidMount: ->
 
@@ -220,7 +229,9 @@ class AccountSettingsPage extends React.Component
         method: "POST"
         body: json
         success: (json) =>
-          OnboardingActions.accountJSONReceived(json)
+          {code} = json
+          invite_code = "aaa" #atom.config.get("inviteCode")
+          OnboardingActions.accountJSONReceived({code, invite_code})
         error: @_onNetworkError
     .catch(@_onNetworkError)
 
@@ -273,11 +284,6 @@ class AccountSettingsPage extends React.Component
         callback(json)
       error: (err) =>
         callback()
-
-  _decrypt: (encrypted, key, iv) ->
-    decipher = Crypto.createDecipheriv('aes-256-ecb', key, iv)
-    dec = decipher.update(encrypted,'hex','utf8')
-    dec += decipher.final('utf8');
 
   _resize: =>
     setTimeout( =>
